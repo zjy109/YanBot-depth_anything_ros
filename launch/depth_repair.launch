@@ -1,0 +1,33 @@
+<launch>
+  <!-- Get environment variables -->
+  <arg name="venv" default="/home/$(env USER)/miniconda3/envs/yoesam/bin/python" doc="Path to python environment."/>
+  <env name="LD_PRELOAD" value="/usr/lib/x86_64-linux-gnu/libffi.so.7" />
+
+  <!-- Get arguments -->
+  <!-- <arg name="model_path" default="$(find depth_anything_ros)/weights/depth_anything_v2_vits.pth" doc="Detection Model Path [default: weights/depth_anything_v2_vits.pth]" /> -->
+  <arg name="model_encoder" default="vits" doc="Can be either vits, vitb or vitl."/>
+  <arg name="input_size" default="518" doc="Min confidence threshold for box." />
+  <!-- <arg name="text_threshold" default="0.3" doc="Min confidence threshold for text." /> -->
+  <!-- <arg name="default_prompt" default="keyboard. mouse. cellphone. earphone. laptop. computer. water bottle. plant. keys. door. chair." doc="Default prompt for grounding. end with ." /> -->
+
+  
+  <!-- Get SAM checkpoint -->
+  <arg name="model_path" value="$(find depth_anything_ros)/weights/depth_anything_v2_vits.pth" if="$(eval model_encoder == 'vits')" />
+  <arg name="model_path" value="$(find depth_anything_ros)/weights/depth_anything_v2_vitb.pth" if="$(eval model_encoder == 'vitb')" />
+  <arg name="model_path" value="$(find depth_anything_ros)/weights/depth_anything_v2_vitl.pth" if="$(eval model_encoder == 'vitl')" />
+  <!-- <arg name="sam_checkpoint" value="$(find yolo_evsam_ros)/weights/efficientvit_sam_l1.pt" /> -->
+
+  <!-- Run Contact-GraspNet -->
+  <node name="depth_anything_ros" pkg="depth_anything_ros" type="depth_repair.py" launch-prefix = "$(arg venv)" output="screen" >
+      <param name="model_path" type="str" value="$(arg model_path)" />
+      <!-- <param name="config" type="str" value="$(arg config)" /> -->
+      <!-- <param name="sam_checkpoint" type="str" value="$(arg sam_checkpoint)" /> -->
+      <param name="model_encoder" type="str" value="$(arg model_encoder)" />
+      <param name="input_size" type="int" value="$(arg input_size)" />
+      <!-- <param name="text_threshold" type="double" value="$(arg text_threshold)" /> -->
+  </node>
+
+  <!-- <node name="grounding_sam_node" pkg="grounding_sam_ros" type="grounding_sam_node.py" output="screen" >
+      <param name="default_prompt" type="str" value="$(arg default_prompt)" />
+  </node> -->
+</launch>
