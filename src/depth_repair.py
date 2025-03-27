@@ -4,11 +4,15 @@ import numpy as np
 import torch
 import cv2
 import os
+from scipy.optimize import curve_fit
+import shutil
+
 
 from message_filters import ApproximateTimeSynchronizer, Subscriber
 from sensor_msgs.msg import Image
 
 from depth_anything_v2.dpt import DepthAnythingV2
+
 
 model_configs = {
         'vits': {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384]},
@@ -62,14 +66,31 @@ class DepthRestoration:
         time_stamp = image_msg.header.stamp
         image = self.cv_bridge.imgmsg_to_cv2(image_msg)
         raw_depth = self.cv_bridge.imgmsg_to_cv2(depth_msg, "passthrough")
+
+        # 计算原始深度图像的0值占比，如果0值太多则该深度图无效，直接返回
+        zero_ratio = np.count_nonzero(raw_depth == 0) / raw_depth.size
+        if zero_ratio > 0.5:
+            rospy.loginfo("Invalid raw depth")
+            return
+
         # 进行深度估计，得到相对深度
         estimated_depth = self.depth_anything.infer_image(image, self.input_size)
 
-        # Depth Anything V2 输出的是 逆深度，需要取倒数再得到与d435一致的深度值模式——距离相机较近的物体会有较小的值，较远的物体会有较大的值
+        end_time = rospy.Time.now()
+        depth_repair_time = (end_time - start_time).to_sec()*1000
+        rospy.loginfo(f"depth estimate time: {depth_repair_time:.1f} ms")
+
+        print(f"image_timestamp:{time_stamp.to_sec()}")
+
+        start_time = rospy.Time.now()
+
+        # # Depth Anything V2 输出的是 逆深度，需要取倒数再得到与d435一致的深度值模式——距离相机较近的物体会有较小的值，较远的物体会有较大的值
         # estimated_depth = 1 / (estimated_depth + 1e-6)  # 实测还是直接用逆深度做 最小二乘 效果更好
         
         # 与原始深度进行大小对比，得到绝对深度
-        absolute_depth = self.convert_to_absolute_depth(estimated_depth, raw_depth)
+        # absolute_depth = self.convert_to_absolute_depth(estimated_depth, raw_depth)
+        # absolute_depth = self.median_normalization(estimated_depth, raw_depth)
+        absolute_depth = self.inverse_depth_to_absolute(estimated_depth, raw_depth)
 
         absolute_depth_msg = self.cv_bridge.cv2_to_imgmsg(absolute_depth, encoding="16UC1")
         absolute_depth_msg.header.stamp = time_stamp
@@ -77,18 +98,28 @@ class DepthRestoration:
         # 测量深度修复的时间
         end_time = rospy.Time.now()
         depth_repair_time = (end_time - start_time).to_sec()*1000
-        rospy.loginfo(f"depth repair time: {depth_repair_time:.1f} ms")
+        rospy.loginfo(f"convert to absolute depth time: {depth_repair_time:.1f} ms")
+        print(" ")
 
-        # # 将修复的深度做成可视化图片，调试用
-        # vis_depth = cv2.convertScaleAbs(estimated_depth.copy(), alpha=255.0 / estimated_depth.max())
+        # 将修复的深度做成可视化图片，调试用
+        vis_raw_depth = cv2.convertScaleAbs(raw_depth.copy(), alpha=0.06)
+        # print("alpha:{}".format(255.0 / estimated_depth.max()))
         # vis_absolute_depth = cv2.convertScaleAbs(absolute_depth, alpha=255.0 / absolute_depth.max())
-        # outdir1 = '/home/zjy/vis_depth'
-        # outdir2 = '/home/zjy/vis_absolute_depth'
-        # filename = f"{time_stamp.to_sec():.9f}.png"
-        # # 估计出的相对深度
+        vis_absolute_depth = cv2.convertScaleAbs(absolute_depth.copy(), alpha=0.06)
+        # print("alpha_absolute:{}".format(255.0 / absolute_depth.max()))
+
+
+        outdir1 = '/home/zjy/vis_raw_depth/3'
+        outdir2 = '/home/zjy/vis_absolute_depth/3'
+        filename = f"{time_stamp.to_sec():.9f}.png"
+
+        # # 如果目录已存在，先删除
+        # if os.path.exists(outdir1):
+        #     shutil.rmtree(outdir1)  # 递归删除整个目录及其内容
+        # # d435测量的原始深度
         # os.makedirs(outdir1, exist_ok=True)
         # vis_filename = os.path.join(outdir1, filename)
-        # cv2.imwrite(vis_filename, vis_depth)
+        # cv2.imwrite(vis_filename, vis_raw_depth)
         # # 换算后的绝对深度
         # os.makedirs(outdir2, exist_ok=True)
         # vis_filename = os.path.join(outdir2, filename)
@@ -100,15 +131,23 @@ class DepthRestoration:
         rospy.set_param("depth_repair_processing", False)
 
     def convert_to_absolute_depth(self, estimated_depth, measured_depth):
+        # valid_mask = (measured_depth > 5) & (measured_depth < 5000)
+
+        # mean_val = np.mean(measured_depth[valid_mask])
+        # std_val = np.std(measured_depth[valid_mask])
+        # valid_mask &= (measured_depth > (mean_val - 2 * std_val)) & (measured_depth < (mean_val + 2 * std_val))
+
         D = measured_depth.astype(np.float32)
         X = estimated_depth.astype(np.float32)
 
-        # # 查看原始测量深度的最大、最小值，用于调试时确认原始深度的可靠性
+        valid_mask = ((D > 300) & (D < 1500)) 
+
+        # # 查看原始测量和估计深度的最大、最小值，用于调试时确认原始深度的可靠性
         # print(D.max())
         # print(D.min())
+        # print(X.max())
+        # print(X.min())
 
-        # 只保留 0 < D <= 3500 的有效值
-        valid_mask = (D > 300) & (D < 1500)
         D_valid = D[valid_mask]
         X_valid = X[valid_mask]
 
@@ -116,16 +155,77 @@ class DepthRestoration:
         params, residuals, rank, s = np.linalg.lstsq(X_stack, D_valid, rcond=None)
         A, b = params
 
-        # # 输出缩放和偏置参数
-        # print(f"Scale factor (A): {A}, Offset (b): {b}")
+        # 输出缩放和偏置参数
+        print(f"Scale factor (A): {A}, Offset (b): {b}")
 
         absolute_depth = (A * estimated_depth + b).astype(np.uint16)
 
-        # # 计算估计深度和原始深度的差值的平均值
-        # diff_mean = np.mean((absolute_depth.astype(np.float32) - D)[valid_mask])
-        # print(f"Mean difference: {diff_mean}")
+        # 计算估计深度和原始深度的差值的平均值
+        valid_mask = (D > 5) & (D < 5000)
+        diff_mean = np.mean((absolute_depth.astype(np.float32) - D)[valid_mask])
+        print(f"Mean difference: {diff_mean}")
 
         return absolute_depth
+
+    def median_normalization(self, estimated_depth, measured_depth):
+        """
+        通过中位数匹配的方式，将估计的逆深度转换为绝对深度
+        :param estimated_depth: np.ndarray, 估计的逆深度 (H, W)
+        :param measured_depth: np.ndarray, 测量得到的绝对深度 (H, W)
+        :return: absolute_depth: np.ndarray, 变换后的绝对深度 (H, W)
+        """
+        valid_mask = (measured_depth > 0) & (estimated_depth > 0)
+        
+        # 计算尺度因子 lambda
+        lambda_scale = np.median(measured_depth[valid_mask]) / np.median(1.0 / estimated_depth[valid_mask])
+
+        # 进行变换
+        absolute_depth = lambda_scale * (1.0 / estimated_depth)
+        absolute_depth = absolute_depth.astype(np.uint16)
+        diff_mean = np.mean((absolute_depth.astype(np.float32) - measured_depth)[valid_mask])
+        print(f"Mean difference: {diff_mean}")
+
+        return np.clip(absolute_depth, 0, None)
+    
+    def inverse_depth_to_absolute(self, estimated_depth, measured_depth):
+        """
+        通过非线性拟合，将估计的逆深度转换为绝对深度
+        :param estimated_depth: np.ndarray, 估计的逆深度 (H, W)
+        :param measured_depth: np.ndarray, 测量得到的绝对深度 (H, W)
+        :return: absolute_depth: np.ndarray, 变换后的绝对深度 (H, W)
+        """
+        # valid_mask = (measured_depth > 30) & (measured_depth < 3000)
+        valid_mask = (measured_depth > 0) & (estimated_depth > 0)
+        # valid_mask = (measured_depth > 30) & (measured_depth < 3000) & (estimated_depth > 0)
+        
+        # 仅取有效区域
+        est_valid = estimated_depth[valid_mask].flatten()
+        meas_valid = measured_depth[valid_mask].flatten()
+
+        est_valid = est_valid[np.isfinite(est_valid)]
+        meas_valid = meas_valid[np.isfinite(meas_valid)]
+
+        # 定义转换函数
+        def inverse_depth_model(x, a, b):
+            return 1.0 / (a * x + b)
+
+        # 拟合 a 和 b
+        # bounds=([min_a, min_b], [max_a, max_b]))
+        # 0.0001< a <0.0003      0.0001< b <0.0011
+        (a_opt, b_opt), _ = curve_fit(inverse_depth_model, est_valid, meas_valid, p0=[0.0002, 0.0006], 
+                                      bounds=([0.0001, 0.0001], [0.0004, 0.0011]), maxfev=500, xtol=1e-4)
+
+        print(f"a: {a_opt}, b: {b_opt}")
+
+        # 进行转换
+        absolute_depth = (1.0 / (a_opt * estimated_depth + b_opt))
+
+        diff_mean = np.mean((absolute_depth - measured_depth.astype(np.float32))[valid_mask])
+        print(f"Mean difference: {diff_mean}")
+
+        absolute_depth = absolute_depth.astype(np.uint16)
+
+        return np.clip(absolute_depth, 0, None)  # 确保深度非负
 
 
 if __name__ == '__main__':
@@ -137,3 +237,10 @@ if __name__ == '__main__':
 
     DepthRestoration(model_encoder, model_path, input_size)
     rospy.spin()
+
+        # # 如果测量深度中超过3000mm的值占比超过10%，说明视野中确实有远景而不是错误测量出极大值，
+        # if np.mean(D > 3000)>0.1:
+        #     valid_mask = ((D > 300) & (D < 2000)) | ((D > 3000) & (D < 5000))
+        # else:
+        #     # 只保留 0 < D <= 3500 的有效值
+        #     valid_mask = (D > 300) & (D < 2000)
