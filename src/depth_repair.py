@@ -6,6 +6,10 @@ import cv2
 import os
 from scipy.optimize import curve_fit
 import shutil
+import matplotlib
+
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 
 
 from message_filters import ApproximateTimeSynchronizer, Subscriber
@@ -13,6 +17,7 @@ from sensor_msgs.msg import Image
 
 from depth_anything_v2.dpt import DepthAnythingV2
 
+matplotlib.use('Agg')  # 设定非GUI后端，避免 Tkinter 问题
 
 model_configs = {
         'vits': {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384]},
@@ -101,6 +106,22 @@ class DepthRestoration:
         rospy.loginfo(f"convert to absolute depth time: {depth_repair_time:.1f} ms")
         print(" ")
 
+        # 计算深度差异
+        depth_difference = absolute_depth.astype(np.int32) - raw_depth.astype(np.int32)
+
+        # 计算数据的最大绝对值
+        vmax = np.max(np.abs(depth_difference))
+
+        # 使用 CenteredNorm 确保 0 映射到白色
+        norm = mcolors.TwoSlopeNorm(vmin=-vmax, vcenter=0, vmax=vmax)
+
+        # 绘制图像
+        plt.clf() # 清空之前的图像，防止colorbar 叠加
+        plt.imshow(depth_difference, cmap='bwr', norm=norm, interpolation='nearest')
+        plt.colorbar()
+        # plt.title("2D Heatmap with 0 as White")
+        # plt.show()
+
         # 将修复的深度做成可视化图片，调试用
         vis_raw_depth = cv2.convertScaleAbs(raw_depth.copy(), alpha=0.06)
         # print("alpha:{}".format(255.0 / estimated_depth.max()))
@@ -111,19 +132,33 @@ class DepthRestoration:
 
         outdir1 = '/home/zjy/vis_raw_depth/3'
         outdir2 = '/home/zjy/vis_absolute_depth/3'
+        outdir3 = '/home/zjy/vis_depth_difference/3'
         filename = f"{time_stamp.to_sec():.9f}.png"
 
         # # 如果目录已存在，先删除
         # if os.path.exists(outdir1):
         #     shutil.rmtree(outdir1)  # 递归删除整个目录及其内容
-        # # d435测量的原始深度
-        # os.makedirs(outdir1, exist_ok=True)
-        # vis_filename = os.path.join(outdir1, filename)
-        # cv2.imwrite(vis_filename, vis_raw_depth)
-        # # 换算后的绝对深度
-        # os.makedirs(outdir2, exist_ok=True)
-        # vis_filename = os.path.join(outdir2, filename)
-        # cv2.imwrite(vis_filename, vis_absolute_depth)
+        # d435测量的原始深度
+        os.makedirs(outdir1, exist_ok=True)
+        vis_filename = os.path.join(outdir1, filename)
+        cv2.imwrite(vis_filename, vis_raw_depth)
+        # 换算后的绝对深度
+        os.makedirs(outdir2, exist_ok=True)
+        vis_filename = os.path.join(outdir2, filename)
+        cv2.imwrite(vis_filename, vis_absolute_depth)
+        # # 估计的深度和测量的深度差值可视化
+        # os.makedirs(outdir3, exist_ok=True)
+        # vis_filename = os.path.join(outdir3, filename)
+        # cv2.imwrite(vis_filename, colormap)
+        # 把差值保存为np数据文件
+        # os.makedirs(outdir3, exist_ok=True)
+        # np_file_name = os.path.join(outdir3, f"{time_stamp.to_sec():.9f}.npy")
+        # np.save(np_file_name, depth_difference)
+
+        # 保存plt绘制结果为图片（可选格式: png, jpg, pdf, svg）
+        os.makedirs(outdir3, exist_ok=True)
+        plt_file_name = os.path.join(outdir3, f"{time_stamp.to_sec():.9f}.png")
+        plt.savefig(plt_file_name, dpi=300, bbox_inches='tight')
 
         self.depth_repaired_pub.publish(absolute_depth_msg)
 
