@@ -89,12 +89,6 @@ class DepthRestoration:
 
         # # Depth Anything V2 输出的是 逆深度，需要取倒数再得到与d435一致的深度值模式——距离相机较近的物体会有较小的值，较远的物体会有较大的值
         # estimated_depth = 1 / (estimated_depth)  # 实测还是直接用逆深度做 最小二乘 效果更好
-        # # 创建一个掩码，标记非零元素的位置
-        # non_zero_mask = estimated_depth != 0
-        # # 对非零元素取倒数，零元素保持为零
-        # estimated_depth_copy = estimated_depth.copy().astype(np.float32)
-        # estimated_depth = np.zeros_like(estimated_depth_copy)
-        # estimated_depth[non_zero_mask] = 1.0 / estimated_depth_copy[non_zero_mask]
         
         # 与原始深度进行大小对比，得到绝对深度
         absolute_depth = self.inverse_depth_to_absolute(estimated_depth.copy(), raw_depth.copy())
@@ -108,30 +102,26 @@ class DepthRestoration:
         rospy.loginfo(f"convert to absolute depth time: {depth_repair_time:.1f} ms")
         print(" ")
 
-        ## 可视化估计深度和测量深度的差异
-        # 计算深度差异
-        depth_difference = absolute_depth.astype(np.int32) - raw_depth.astype(np.int32)
-        # # 计算数据的最大绝对值
-        # vmax = np.max(np.abs(depth_difference))
-        # 设置最大和最小值为 -1000 和 1000
-        vmin = -1000
-        vmax = 1000
-        # 限制 depth_difference 在 [-1000, 1000] 之间
-        depth_difference = np.clip(depth_difference, vmin, vmax)
-        # 使用 CenteredNorm 确保 0 映射到白色
-        norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
-        # 绘制图像
-        plt.clf()  # 清空之前的图像，防止colorbar叠加
-        plt.imshow(depth_difference, cmap='bwr', norm=norm, interpolation='nearest')
-        plt.colorbar()
+        # ## 可视化估计深度和测量深度的差异
+        # # 计算深度差异
+        # depth_difference = absolute_depth.astype(np.int32) - raw_depth.astype(np.int32)
+        # # # 计算数据的最大绝对值
+        # # vmax = np.max(np.abs(depth_difference))
+        # # 设置最大和最小值为 -1000 和 1000
+        # vmin = -1000
+        # vmax = 1000
+        # # 限制 depth_difference 在 [-1000, 1000] 之间
+        # depth_difference = np.clip(depth_difference, vmin, vmax)
+        # # 使用 CenteredNorm 确保 0 映射到白色
+        # norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
+        # # 绘制图像
+        # plt.clf()  # 清空之前的图像，防止colorbar叠加
+        # plt.imshow(depth_difference, cmap='bwr', norm=norm, interpolation='nearest')
+        # plt.colorbar()
 
-        # 将修复的深度做成可视化图片，调试用
-        vis_raw_depth = cv2.convertScaleAbs(raw_depth.copy(), alpha=0.06)
-        vis_absolute_depth = cv2.convertScaleAbs(absolute_depth.copy(), alpha=0.06)
-
-        # outdir1 = '/home/zjy/vis_depth/raw'
-        # outdir2 = '/home/zjy/vis_depth/absolute_estimate'
-        # outdir3 = '/home/zjy/vis_depth/difference'
+        # # 将修复的深度做成可视化图片，调试用
+        # vis_raw_depth = cv2.convertScaleAbs(raw_depth.copy(), alpha=0.06)
+        # vis_absolute_depth = cv2.convertScaleAbs(absolute_depth.copy(), alpha=0.06)
 
         outdir1 = '/home/zjy/vis_depth_3/raw'
         outdir2 = '/home/zjy/vis_depth_3/absolute_estimate'
@@ -143,18 +133,18 @@ class DepthRestoration:
         # if os.path.exists(outdir1):
         #     shutil.rmtree(outdir1)  # 递归删除整个目录及其内容
 
-        # 导出d435测量的原始深度
-        os.makedirs(outdir1, exist_ok=True)
-        vis_filename = os.path.join(outdir1, filename)
-        cv2.imwrite(vis_filename, vis_raw_depth)
-        # 导出估计并缩放后的绝对深度
-        os.makedirs(outdir2, exist_ok=True)
-        vis_filename = os.path.join(outdir2, filename)
-        cv2.imwrite(vis_filename, vis_absolute_depth)
-        # 导出深度差异（plt绘制结果，保存为为图片）
-        os.makedirs(outdir3, exist_ok=True)
-        plt_file_name = os.path.join(outdir3, f"{time_stamp.to_sec():.9f}.png")
-        plt.savefig(plt_file_name, dpi=300, bbox_inches='tight')
+        # # 导出d435测量的原始深度
+        # os.makedirs(outdir1, exist_ok=True)
+        # vis_filename = os.path.join(outdir1, filename)
+        # cv2.imwrite(vis_filename, vis_raw_depth)
+        # # 导出估计并缩放后的绝对深度
+        # os.makedirs(outdir2, exist_ok=True)
+        # vis_filename = os.path.join(outdir2, filename)
+        # cv2.imwrite(vis_filename, vis_absolute_depth)
+        # # 导出深度差异（plt绘制结果，保存为为图片）
+        # os.makedirs(outdir3, exist_ok=True)
+        # plt_file_name = os.path.join(outdir3, f"{time_stamp.to_sec():.9f}.png")
+        # plt.savefig(plt_file_name, dpi=300, bbox_inches='tight')
 
         self.depth_repaired_pub.publish(absolute_depth_msg)
 
@@ -168,30 +158,14 @@ class DepthRestoration:
         :param measured_depth: np.ndarray, 测量得到的绝对深度 (H, W)
         :return: absolute_depth: np.ndarray, 变换后的绝对深度 (H, W)
         """
-        # valid_mask = (measured_depth > 30) & (measured_depth < 3000)
-        # valid_mask = (measured_depth > 100) & (measured_depth < 3000) & (estimated_depth > 1e-4)
-        # valid_mask = (measured_depth > 30) & (measured_depth < 3000) & (estimated_depth > 0)
-        # valid_mask = ((measured_depth > 30) & (measured_depth < 2000)) | ((measured_depth > 4500) & (measured_depth < 5000))
-
         valid_mask = (measured_depth > 100) & (estimated_depth > 1e-6)
         
         # 仅取有效区域
         est_valid = estimated_depth[valid_mask].flatten().astype(np.float32)
         meas_valid = measured_depth[valid_mask].flatten().astype(np.float32)
+        # Depth Anything V2 输出的是 逆深度，需要取倒数再得到与d435一致的深度值模式——距离相机较近的物体会有较小的值，较远的物体会有较大的值
         meas_valid = 1.0 /meas_valid
 
-        # estimated_depth_1 = estimated_depth.astype(np.float32)
-        # measured_depth_1 = measured_depth.astype(np.float32)
-
-        # est_valid = estimated_depth_1[valid_mask]
-        # meas_valid = measured_depth_1[valid_mask]
-
-        # est_valid = est_valid[np.isfinite(est_valid)]
-        # meas_valid = meas_valid[np.isfinite(meas_valid)]
-
-        # 定义转换函数
-        # def inverse_depth_model(x, a, b):
-        #     return 1.0 / (a * x + b)
         def inverse_depth_model(x, a, b):
             return a * x + b
 
@@ -199,19 +173,17 @@ class DepthRestoration:
         # bounds=([min_a, min_b], [max_a, max_b]))    0.0001< a <0.0003      0.0001< b <0.0011
         # (a_opt, b_opt), _ = curve_fit(inverse_depth_model, est_valid, meas_valid, p0=[0.0002, 0.0006], 
         #                               bounds=([0.0001, 0.0005], [0.0003, 0.0009]), maxfev=50, xtol=1e-7, method='trf')
-        # (a_opt, b_opt), _ = curve_fit(inverse_depth_model, est_valid, meas_valid, p0=[0.0002, 0.0006], 
-        #                               bounds=([0.0001, 0.0001], [0.0004, 0.0011]))
+        # 实测发现不加范围限制运行速度快很多
         (a_opt, b_opt), _ = curve_fit(inverse_depth_model, est_valid, meas_valid, p0=[0.0002, 0.0006])
         
-        print(f"a: {a_opt}, b: {b_opt}")
+        # print(f"a: {a_opt}, b: {b_opt}")
 
         # 进行转换
         absolute_depth = (1.0 / (a_opt * estimated_depth + b_opt))
-        # absolute_depth = (a_opt * estimated_depth_1 + b_opt)
 
-        # 计算估计深度和测量深度的差值的平均值
-        diff_mean = np.mean(np.abs((absolute_depth - measured_depth)[valid_mask]))
-        print(f"Mean difference: {diff_mean}")
+        # # 计算估计深度和测量深度的差值的平均值
+        # diff_mean = np.mean(np.abs((absolute_depth - measured_depth)[valid_mask]))
+        # print(f"Mean difference: {diff_mean}")
 
         absolute_depth = absolute_depth.astype(np.uint16)
 
