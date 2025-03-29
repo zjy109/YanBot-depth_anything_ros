@@ -123,11 +123,11 @@ class DepthRestoration:
         # vis_raw_depth = cv2.convertScaleAbs(raw_depth.copy(), alpha=0.06)
         # vis_absolute_depth = cv2.convertScaleAbs(absolute_depth.copy(), alpha=0.06)
 
-        outdir1 = '/home/zjy/vis_depth_3/raw'
-        outdir2 = '/home/zjy/vis_depth_3/absolute_estimate'
-        outdir3 = '/home/zjy/vis_depth_3/difference'
+        # outdir1 = '/home/zjy/vis_depth/raw'
+        # outdir2 = '/home/zjy/vis_depth/absolute_estimate'
+        # outdir3 = '/home/zjy/vis_depth/difference'
 
-        filename = f"{time_stamp.to_sec():.9f}.png"
+        # filename = f"{time_stamp.to_sec():.9f}.png"
 
         # # 如果目录已存在，先删除
         # if os.path.exists(outdir1):
