@@ -9,6 +9,7 @@ import shutil
 
 from message_filters import ApproximateTimeSynchronizer, Subscriber
 from sensor_msgs.msg import Image
+from std_msgs.msg import Bool
 
 from depth_anything_v2.dpt import DepthAnythingV2
 
@@ -27,7 +28,7 @@ model_configs = {
 class DepthRestoration:
     def __init__(self, model_encoder, model_path, input_size):
         # DEVICE = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
-        # torch.cuda.empty_cache()
+        torch.cuda.empty_cache()
         if torch.cuda.is_available():    
             DEVICE = 'cuda'
         else:
@@ -51,13 +52,18 @@ class DepthRestoration:
         # 修复掩码 发布者
         self.depth_repaired_pub = rospy.Publisher("depth_repaired", Image, queue_size=1)
 
-        rospy.loginfo("Loading models...")
+        # # 模型加载完成消息 发布者
+        # init_pub = rospy.Publisher("/depth_anything_ros_init", Bool, queue_size=1)
+
+        rospy.loginfo("Loading depth anything models...")
         
         depth_anything = DepthAnythingV2(**model_configs[model_encoder])
         depth_anything.load_state_dict(torch.load(model_path, map_location='cpu'))
         self.depth_anything = depth_anything.to(DEVICE).eval()
 
-        rospy.loginfo("Models are loaded")
+        # init_pub.publish(True)
+        rospy.set_param("/depth_anything_ros_init", True)
+        rospy.loginfo("depth anything models are loaded")
 
     def sync_sub_callback(self, image_msg, depth_msg):
         start_time = rospy.Time.now()
@@ -79,13 +85,13 @@ class DepthRestoration:
         # 进行深度估计，得到相对深度
         estimated_depth = self.depth_anything.infer_image(image, self.input_size)
 
-        end_time = rospy.Time.now()
-        depth_repair_time = (end_time - start_time).to_sec()*1000
-        rospy.loginfo(f"depth estimate time: {depth_repair_time:.1f} ms")
+        # end_time = rospy.Time.now()
+        # depth_repair_time = (end_time - start_time).to_sec()*1000
+        # rospy.loginfo(f"depth estimate time: {depth_repair_time:.1f} ms")
 
-        print(f"image_timestamp:{time_stamp.to_sec()}")
+        # print(f"image_timestamp:{time_stamp.to_sec()}")
 
-        start_time = rospy.Time.now()
+        # start_time = rospy.Time.now()
 
         # # Depth Anything V2 输出的是 逆深度，需要取倒数再得到与d435一致的深度值模式——距离相机较近的物体会有较小的值，较远的物体会有较大的值
         # estimated_depth = 1 / (estimated_depth)  # 实测还是直接用逆深度做 最小二乘 效果更好
@@ -99,8 +105,9 @@ class DepthRestoration:
         # 测量深度修复的时间
         end_time = rospy.Time.now()
         depth_repair_time = (end_time - start_time).to_sec()*1000
-        rospy.loginfo(f"convert to absolute depth time: {depth_repair_time:.1f} ms")
-        print(" ")
+        # rospy.loginfo(f"convert to absolute depth time: {depth_repair_time:.1f} ms")
+        rospy.loginfo(f"depth repair time: {depth_repair_time:.1f} ms")
+        # print(" ")
 
         # ## 可视化估计深度和测量深度的差异
         # # 计算深度差异
